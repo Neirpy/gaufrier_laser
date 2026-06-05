@@ -1,0 +1,916 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" href="favicon.svg" type="image/svg+xml">
+    <title>Générateur de 3d Laser file</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="style.css">
+    <script src="script.js" defer></script>
+    
+    <!-- Bibliothèques 3D (Three.js) -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/STLLoader.js"></script>
+
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f8fafc; color: #334155; }
+        .canvas-area { background-color: white; border: 1px solid #cbd5e1; border-radius: 0.5rem; position: relative; overflow: hidden; }
+        
+        svg { display: block; margin: 0 auto; user-select: none; }
+        .cut-line { stroke: #FF0000; stroke-width: 0.5px; fill: none; pointer-events: none; } 
+        .engrave-text { fill: #000000; font-family: monospace; font-size: 10px; text-anchor: middle; dominant-baseline: middle; pointer-events: none; } 
+        .plate-line { stroke: #3b82f6; stroke-width: 1px; stroke-dasharray: 5,5; fill: none; } 
+        .plate-text { fill: #3b82f6; font-family: sans-serif; font-size: 10px; }
+        
+        .cursor-grab { cursor: grab; }
+        .cursor-grabbing { cursor: grabbing; }
+        .hitbox { fill: transparent; cursor: inherit; pointer-events: all; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { height: 8px; width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        /* Tabs */
+        .tab-btn { padding: 0.5rem 1rem; cursor: pointer; border-bottom: 2px solid transparent; font-weight: 600; color: #64748b; }
+        .tab-btn.active { border-bottom-color: #2563eb; color: #2563eb; }
+        .tab-content { display: none; height: 100%; width: 100%; }
+        .tab-content.active { display: block; }
+        
+        #loading-overlay { display: none; position: absolute; inset: 0; background: rgba(255,255,255,0.8); z-index: 50; justify-content: center; align-items: center; flex-direction: column; }
+    </style>
+</head>
+<body class="p-4 md:p-8 h-screen flex flex-col">
+
+    <div class="max-w-7xl mx-auto w-full flex-grow flex flex-col gap-6">
+        
+        <!-- En-tête -->
+        <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-lg shadow-sm border border-slate-200 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-slate-800">Slicer de Moule d'Injection 3D</h1>
+                <p class="text-sm text-slate-500">Importez un STL, générez les strates du moule, alignez-les et exportez pour le laser.</p>
+                <a href="index.html" class="text-sm text-blue-600 hover:underline mt-1 inline-block">Retour au générateur de gaufrier</a>
+            </div>
+            <div class="flex gap-2">
+                <label for="file-upload" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold py-2 px-4 border border-slate-300 rounded shadow-sm cursor-pointer transition-colors flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 1.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 2.707V11.5a.5.5 0 0 1-1 0V2.707L5.354 4.854a.5.5 0 1 1-.708-.708l3-3z"/></svg>
+                    Importer STL
+                </label>
+                <input id="file-upload" type="file" accept=".stl" class="hidden">
+                
+                <button id="btn-export" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded shadow transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg>
+                    Exporter SVG
+                </button>
+            </div>
+        </header>
+
+        <!-- Zone Principale -->
+        <div class="flex flex-col lg:flex-row gap-6 flex-grow min-h-0">
+            
+            <!-- Panneau de Configuration -->
+            <aside class="lg:w-1/3 bg-white p-6 rounded-lg shadow-sm border border-slate-200 overflow-y-auto">
+                <h2 class="text-lg font-bold text-slate-800 mb-4 border-b pb-2">Paramètres du Moule</h2>
+                
+                <div class="space-y-6">
+                    <!-- Géométrie du moule -->
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wider">Structure</h3>
+                        
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Épaisseur Strates / Plexi (mm)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" id="slider-thickness" min="1" max="15" step="0.5" value="6" class="w-full accent-blue-600">
+                                <span id="val-thickness" class="text-sm font-mono w-10 text-right">6.0</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Marge du moule (Paroi mini en mm)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" id="slider-margin" min="5" max="50" step="1" value="15" class="w-full accent-blue-600">
+                                <span id="val-margin" class="text-sm font-mono w-10 text-right">15</span>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-1">Définit la solidité extérieure de votre moule.</p>
+                        </div>
+                        
+                        <div class="mb-2">
+                            <label class="block text-sm font-medium text-slate-700 mb-1">Trous de goupille / Centrage (Rayon mm)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="range" id="slider-dowel" min="0" max="10" step="0.5" value="2" class="w-full accent-blue-600">
+                                <span id="val-dowel" class="text-sm font-mono w-10 text-right">2.0</span>
+                            </div>
+                        </div>
+
+                        <!-- NOUVEAU : Plaque de fond -->
+                        <div class="mt-4 bg-slate-50 p-3 rounded border border-slate-200">
+                            <div class="flex items-center gap-2">
+                                <input type="checkbox" id="check-bottom-plate" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" checked>
+                                <label for="check-bottom-plate" class="text-sm text-slate-700 cursor-pointer font-medium">Ajouter une plaque de fond (Base solide)</label>
+                            </div>
+                            <p class="text-xs text-slate-500 mt-1 ml-6">Crée une strate pleine L_BASE et R_BASE pour empêcher le plastique de couler.</p>
+                        </div>
+                    </div>
+
+                    <hr class="border-slate-200">
+                    
+                    <!-- Paramètres d'export / Nesting -->
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-600 mb-3 uppercase tracking-wider">Placement & Export</h3>
+                        
+                        <div class="bg-slate-50 p-3 rounded border border-slate-200 mb-4">
+                            <div class="flex items-center gap-2 mb-2">
+                                <input type="checkbox" id="check-optimize" class="w-4 h-4 text-blue-600 rounded focus:ring-blue-500" checked>
+                                <label for="check-optimize" class="text-sm text-slate-700 cursor-pointer font-medium">Auto-Nesting (Rangement opti)</label>
+                            </div>
+                            <div class="flex items-center gap-2 mb-3 ml-1">
+                                <input type="checkbox" id="check-rotate" class="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500" checked>
+                                <label for="check-rotate" class="text-sm text-slate-600 cursor-pointer">Autoriser rotation à 90°</label>
+                            </div>
+                            <div class="grid grid-cols-2 gap-4">
+                                <div>
+                                    <label class="block text-xs text-slate-500 mb-1">Largeur Plaque (mm)</label>
+                                    <input type="number" id="input-plate-width" value="600" class="w-full border border-slate-300 rounded p-1 text-sm bg-white">
+                                </div>
+                                <div>
+                                    <label class="block text-xs text-slate-500 mb-1">Hauteur Plaque (mm)</label>
+                                    <input type="number" id="input-plate-height" value="300" class="w-full border border-slate-300 rounded p-1 text-sm bg-white">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <button id="btn-generate" class="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 px-4 rounded shadow-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                        Trancher et Générer le Moule
+                    </button>
+                    
+                    <div id="info-model" class="text-xs text-slate-500 bg-slate-100 p-3 rounded border border-slate-200 mt-4 hidden">
+                        <strong>Infos Modèle :</strong><br>
+                        Dimensions : <span id="info-dim"></span> mm<br>
+                        Nb de strates prévues : <span id="info-layers"></span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Visualisation à Onglets -->
+            <main class="lg:w-2/3 flex-grow flex flex-col min-h-[500px] border border-slate-200 rounded-lg shadow-sm bg-white overflow-hidden">
+                <div class="flex bg-slate-50 border-b border-slate-200">
+                    <div class="tab-btn active" data-target="tab-3d">1. Vue 3D & Modèle</div>
+                    <div class="tab-btn" data-target="tab-2d">2. Plan de Découpe Laser (2D)</div>
+                </div>
+                
+                <div class="relative flex-grow">
+                    
+                    <!-- Overlay Chargement -->
+                    <div id="loading-overlay" class="flex">
+                        <svg class="animate-spin h-10 w-10 text-blue-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        <p class="text-slate-700 font-semibold" id="loading-text">Calcul des tranches en cours...</p>
+                    </div>
+
+                    <!-- Tab 3D -->
+                    <div id="tab-3d" class="tab-content active canvas-area h-full">
+                        <div id="three-container" class="w-full h-full"></div>
+                        <div id="no-model-msg" class="absolute inset-0 flex items-center justify-center text-slate-400 pointer-events-none">
+                            Veuillez importer un fichier STL via le bouton en haut à droite.
+                        </div>
+                    </div>
+
+                    <!-- Tab 2D -->
+                    <div id="tab-2d" class="tab-content canvas-area h-full overflow-auto p-4 bg-[#f8fafc]">
+                        <div id="svg-container" class="w-full h-full min-h-[400px] flex items-start justify-center relative">
+                            <!-- SVG injecté ici -->
+                        </div>
+                    </div>
+
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <script>
+        // --- UI & Tabs Management ---
+        const tabBtns = document.querySelectorAll('.tab-btn');
+        const tabContents = document.querySelectorAll('.tab-content');
+        
+        tabBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                tabBtns.forEach(b => b.classList.remove('active'));
+                tabContents.forEach(c => c.classList.remove('active'));
+                btn.classList.add('active');
+                document.getElementById(btn.dataset.target).classList.add('active');
+                
+                // Force resize for Three.js if tab is shown
+                if(btn.dataset.target === 'tab-3d') {
+                    onWindowResize();
+                }
+            });
+        });
+
+        // --- Elements DOM ---
+        const els = {
+            fileInput: document.getElementById('file-upload'),
+            btnGenerate: document.getElementById('btn-generate'),
+            btnExport: document.getElementById('btn-export'),
+            sliderThickness: document.getElementById('slider-thickness'),
+            valThickness: document.getElementById('val-thickness'),
+            sliderMargin: document.getElementById('slider-margin'),
+            valMargin: document.getElementById('val-margin'),
+            sliderDowel: document.getElementById('slider-dowel'),
+            valDowel: document.getElementById('val-dowel'),
+            checkBottomPlate: document.getElementById('check-bottom-plate'),
+            checkOptimize: document.getElementById('check-optimize'),
+            checkRotate: document.getElementById('check-rotate'),
+            inputPlateWidth: document.getElementById('input-plate-width'),
+            inputPlateHeight: document.getElementById('input-plate-height'),
+            threeContainer: document.getElementById('three-container'),
+            svgContainer: document.getElementById('svg-container'),
+            noModelMsg: document.getElementById('no-model-msg'),
+            loadingOverlay: document.getElementById('loading-overlay'),
+            loadingText: document.getElementById('loading-text'),
+            infoModel: document.getElementById('info-model'),
+            infoDim: document.getElementById('info-dim'),
+            infoLayers: document.getElementById('info-layers')
+        };
+
+        // UI Updates
+        [els.sliderThickness, els.sliderMargin, els.sliderDowel].forEach(el => {
+            el.addEventListener('input', (e) => {
+                document.getElementById('val-' + e.target.id.split('-')[1]).textContent = e.target.value;
+                updateMoldPreview();
+            });
+        });
+
+        // --- Three.js Setup ---
+        let scene, camera, renderer, controls;
+        let objectMesh = null;
+        let moldBoxMesh = null;
+        let objectGeometry = null;
+
+        function initThree() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0xf8fafc);
+
+            camera = new THREE.PerspectiveCamera(45, els.threeContainer.clientWidth / els.threeContainer.clientHeight, 0.1, 1000);
+            camera.position.set(0, -100, 100);
+
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(els.threeContainer.clientWidth, els.threeContainer.clientHeight);
+            els.threeContainer.appendChild(renderer.domElement);
+
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            const ambientLight = new THREE.AmbientLight(0x404040, 1.5);
+            scene.add(ambientLight);
+            
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(50, 50, 50);
+            scene.add(dirLight);
+
+            // Grid helper
+            const gridHelper = new THREE.GridHelper(200, 20);
+            gridHelper.rotation.x = Math.PI / 2;
+            scene.add(gridHelper);
+
+            animate();
+        }
+
+        function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        function onWindowResize() {
+            if(!camera || !renderer) return;
+            camera.aspect = els.threeContainer.clientWidth / els.threeContainer.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(els.threeContainer.clientWidth, els.threeContainer.clientHeight);
+        }
+        window.addEventListener('resize', onWindowResize);
+
+        initThree();
+
+        // --- File Loading ---
+        els.fileInput.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const loader = new THREE.STLLoader();
+                try {
+                    const geometry = loader.parse(event.target.result);
+                    setupModel(geometry);
+                } catch(err) {
+                    alert("Erreur lors de la lecture du fichier STL.");
+                }
+            };
+            reader.readAsArrayBuffer(file);
+        });
+
+        function setupModel(geometry) {
+            if (objectMesh) scene.remove(objectMesh);
+            
+            // Center geometry and compute bounding box
+            geometry.computeBoundingBox();
+            const center = new THREE.Vector3();
+            geometry.boundingBox.getCenter(center);
+            geometry.translate(-center.x, -center.y, -center.z);
+            geometry.computeBoundingBox();
+            
+            objectGeometry = geometry;
+
+            const material = new THREE.MeshStandardMaterial({ 
+                color: 0x3b82f6, 
+                roughness: 0.5, 
+                metalness: 0.1 
+            });
+            objectMesh = new THREE.Mesh(geometry, material);
+            scene.add(objectMesh);
+
+            // Ajust camera
+            const box = geometry.boundingBox;
+            const maxDim = Math.max(box.max.x - box.min.x, box.max.y - box.min.y, box.max.z - box.min.z);
+            camera.position.set(0, -maxDim * 1.5, maxDim * 1.5);
+            controls.target.set(0,0,0);
+
+            els.noModelMsg.style.display = 'none';
+            els.btnGenerate.disabled = false;
+            
+            updateMoldPreview();
+        }
+
+        function updateMoldPreview() {
+            if (!objectGeometry) return;
+            
+            if (moldBoxMesh) scene.remove(moldBoxMesh);
+
+            const margin = parseFloat(els.sliderMargin.value);
+            const box = objectGeometry.boundingBox;
+            
+            const w = (box.max.x - box.min.x) + margin * 2;
+            const h = (box.max.y - box.min.y) + margin * 2;
+            const d = (box.max.z - box.min.z); // Z dimension is exact to model
+
+            const boxGeo = new THREE.BoxGeometry(w, h, d);
+            const boxMat = new THREE.MeshBasicMaterial({ 
+                color: 0x10b981, 
+                wireframe: true,
+                transparent: true,
+                opacity: 0.3
+            });
+            
+            moldBoxMesh = new THREE.Mesh(boxGeo, boxMat);
+            // Center of Z needs to align with model
+            moldBoxMesh.position.z = (box.max.z + box.min.z) / 2;
+            scene.add(moldBoxMesh);
+
+            // Update UI info
+            els.infoModel.classList.remove('hidden');
+            els.infoDim.textContent = `${w.toFixed(1)} x ${h.toFixed(1)} x ${d.toFixed(1)}`;
+            const thickness = parseFloat(els.sliderThickness.value);
+            els.infoLayers.textContent = Math.ceil(d / thickness);
+        }
+
+
+        // --- Slicing Engine (Geometry to 2D Paths) ---
+
+        // Helper to intersect line segment with Z plane
+        function intersectZPlane(p1, p2, z) {
+            const t = (z - p1.z) / (p2.z - p1.z);
+            return { x: p1.x + t * (p2.x - p1.x), y: p1.y + t * (p2.y - p1.y) };
+        }
+
+        // Distance between two 2D points
+        function dist2D(p1, p2) {
+            return Math.sqrt((p1.x - p2.x)**2 + (p1.y - p2.y)**2);
+        }
+
+        function getSliceLoops(geometry, z) {
+            const pos = geometry.attributes.position.array;
+            const segments = [];
+            
+            // Extract raw intersection segments
+            for (let i = 0; i < pos.length; i += 9) {
+                const z1 = pos[i+2], z2 = pos[i+5], z3 = pos[i+8];
+                const p1 = {x: pos[i], y: pos[i+1], z: z1};
+                const p2 = {x: pos[i+3], y: pos[i+4], z: z2};
+                const p3 = {x: pos[i+6], y: pos[i+7], z: z3};
+                
+                let pts = [];
+                if ((z1 <= z && z2 > z) || (z2 <= z && z1 > z)) pts.push(intersectZPlane(p1, p2, z));
+                if ((z2 <= z && z3 > z) || (z3 <= z && z2 > z)) pts.push(intersectZPlane(p2, p3, z));
+                if ((z3 <= z && z1 > z) || (z1 <= z && z3 > z)) pts.push(intersectZPlane(p3, p1, z));
+                
+                if (pts.length >= 2) {
+                    segments.push([pts[0], pts[1]]);
+                }
+            }
+
+            // Chain segments into loops
+            let loops = [];
+            let currentLoop = [];
+            let segs = [...segments];
+            const EPS = 1e-4; // Tolerance for endpoint matching
+            
+            while (segs.length > 0) {
+                if (currentLoop.length === 0) {
+                    let seg = segs.pop();
+                    currentLoop.push(seg[0], seg[1]);
+                } else {
+                    let tail = currentLoop[currentLoop.length - 1];
+                    let head = currentLoop[0];
+                    let found = false;
+                    
+                    for (let i = 0; i < segs.length; i++) {
+                        let s = segs[i];
+                        if (dist2D(s[0], tail) < EPS) {
+                            currentLoop.push(s[1]);
+                            segs.splice(i, 1);
+                            found = true; break;
+                        } else if (dist2D(s[1], tail) < EPS) {
+                            currentLoop.push(s[0]);
+                            segs.splice(i, 1);
+                            found = true; break;
+                        } else if (dist2D(s[0], head) < EPS) {
+                            currentLoop.unshift(s[1]);
+                            segs.splice(i, 1);
+                            found = true; break;
+                        } else if (dist2D(s[1], head) < EPS) {
+                            currentLoop.unshift(s[0]);
+                            segs.splice(i, 1);
+                            found = true; break;
+                        }
+                    }
+                    
+                    // If no connection found, close the current loop and start a new one
+                    if (!found) {
+                        // Force close loop if it's not logically closed (STLs are messy)
+                        if (dist2D(currentLoop[0], currentLoop[currentLoop.length-1]) > EPS) {
+                             currentLoop.push({...currentLoop[0]});
+                        }
+                        loops.push(currentLoop);
+                        currentLoop = [];
+                    }
+                }
+            }
+            if (currentLoop.length > 0) {
+                 if (dist2D(currentLoop[0], currentLoop[currentLoop.length-1]) > EPS) {
+                     currentLoop.push({...currentLoop[0]});
+                 }
+                loops.push(currentLoop);
+            }
+            
+            return loops;
+        }
+
+        // Sutherland-Hodgman clipping for axis-aligned plane X=0
+        function clipPolygonX0(loop, side) {
+            // side: 'left' keeps x <= 0, 'right' keeps x >= 0
+            let output = [];
+            if (loop.length === 0) return [];
+            
+            let S = loop[loop.length - 1];
+            
+            for (let i = 0; i < loop.length; i++) {
+                let E = loop[i];
+                
+                let isEInside = side === 'left' ? (E.x <= 0) : (E.x >= 0);
+                let isSInside = side === 'left' ? (S.x <= 0) : (S.x >= 0);
+                
+                if (isEInside) {
+                    if (!isSInside) {
+                        // Calculate intersection at x=0
+                        let t = (0 - S.x) / (E.x - S.x);
+                        output.push({ x: 0, y: S.y + t * (E.y - S.y) });
+                    }
+                    output.push(E);
+                } else {
+                    if (isSInside) {
+                        let t = (0 - S.x) / (E.x - S.x);
+                        output.push({ x: 0, y: S.y + t * (E.y - S.y) });
+                    }
+                }
+                S = E;
+            }
+            
+            // Re-close the polygon if needed
+            if (output.length > 0 && (Math.abs(output[0].x - output[output.length-1].x) > 1e-4 || Math.abs(output[0].y - output[output.length-1].y) > 1e-4)) {
+                output.push({...output[0]});
+            }
+            
+            return output;
+        }
+
+        function createSvgPathString(polygon, offsetX, offsetY) {
+            if (polygon.length === 0) return "";
+            let path = "";
+            for (let i = 0; i < polygon.length; i++) {
+                path += (i === 0 ? "M " : "L ") + (polygon[i].x - offsetX).toFixed(3) + " " + (polygon[i].y - offsetY).toFixed(3) + " ";
+            }
+            path += "Z";
+            return path;
+        }
+
+        // --- Generator & Bin Packing ---
+        let finalPieces = [];
+        let exportGap = 5;
+
+        class MaxRectsPacker {
+            constructor(width, height) {
+                this.binWidth = width;
+                this.binHeight = height;
+                this.freeRectangles = [{x: 0, y: 0, w: width, h: height}];
+            }
+            insert(width, height, allowRotation) {
+                let bestNode = {x: 0, y: 0, w: 0, h: 0};
+                let bestY = Infinity;
+                let bestX = Infinity;
+                let rotated = false;
+
+                for (let i = 0; i < this.freeRectangles.length; i++) {
+                    let rect = this.freeRectangles[i];
+                    
+                    // Test position normale
+                    if (rect.w >= width && rect.h >= height) {
+                        // Heuristique "Bottom-Left" : On s'aligne le plus en haut (Y mini) et à gauche (X mini) possible
+                        if (rect.y < bestY || (Math.abs(rect.y - bestY) < 1e-4 && rect.x < bestX)) {
+                            bestNode.x = rect.x; bestNode.y = rect.y; bestNode.w = width; bestNode.h = height;
+                            bestY = rect.y; bestX = rect.x;
+                            rotated = false;
+                        }
+                    }
+                    
+                    // Test position tournée (90°) pour s'allonger à l'horizontale
+                    if (allowRotation && rect.w >= height && rect.h >= width) {
+                        if (rect.y < bestY || (Math.abs(rect.y - bestY) < 1e-4 && rect.x < bestX)) {
+                            bestNode.x = rect.x; bestNode.y = rect.y; bestNode.w = height; bestNode.h = width;
+                            bestY = rect.y; bestX = rect.x;
+                            rotated = true;
+                        }
+                    }
+                }
+                
+                if (bestY === Infinity) return null;
+                
+                this.splitFreeNode(bestNode);
+                this.pruneFreeList();
+                return { x: bestNode.x, y: bestNode.y, rotated: rotated };
+            }
+            splitFreeNode(usedNode) {
+                let newRectangles = [];
+                for (let i = 0; i < this.freeRectangles.length; i++) {
+                    let freeNode = this.freeRectangles[i];
+                    if (usedNode.x >= freeNode.x + freeNode.w || usedNode.x + usedNode.w <= freeNode.x ||
+                        usedNode.y >= freeNode.y + freeNode.h || usedNode.y + usedNode.h <= freeNode.y) {
+                        newRectangles.push(freeNode);
+                    } else {
+                        if (usedNode.y > freeNode.y && usedNode.y < freeNode.y + freeNode.h) newRectangles.push({x: freeNode.x, y: freeNode.y, w: freeNode.w, h: usedNode.y - freeNode.y});
+                        if (usedNode.y + usedNode.h < freeNode.y + freeNode.h) newRectangles.push({x: freeNode.x, y: usedNode.y + usedNode.h, w: freeNode.w, h: freeNode.y + freeNode.h - (usedNode.y + usedNode.h)});
+                        if (usedNode.x > freeNode.x && usedNode.x < freeNode.x + freeNode.w) newRectangles.push({x: freeNode.x, y: freeNode.y, w: usedNode.x - freeNode.x, h: freeNode.h});
+                        if (usedNode.x + usedNode.w < freeNode.x + freeNode.w) newRectangles.push({x: usedNode.x + usedNode.w, y: freeNode.y, w: freeNode.x + freeNode.w - (usedNode.x + usedNode.w), h: freeNode.h});
+                    }
+                }
+                this.freeRectangles = newRectangles;
+            }
+            pruneFreeList() {
+                for (let i = 0; i < this.freeRectangles.length; i++) {
+                    for (let j = i + 1; j < this.freeRectangles.length; j++) {
+                        let a = this.freeRectangles[i], b = this.freeRectangles[j];
+                        if (a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h) { this.freeRectangles.splice(i, 1); i--; break; }
+                        if (b.x >= a.x && b.y >= a.y && b.x + b.w <= a.x + a.w && b.y + b.h <= a.y + a.h) { this.freeRectangles.splice(j, 1); j--; }
+                    }
+                }
+            }
+        }
+
+        els.btnGenerate.addEventListener('click', () => {
+            if(!objectGeometry) return;
+            
+            els.loadingOverlay.style.display = 'flex';
+            
+            // Delai pour laisser l'UI s'afficher
+            setTimeout(() => {
+                processSlicing();
+                
+                // Basculer sur l'onglet 2D
+                tabBtns[1].click();
+                
+                els.loadingOverlay.style.display = 'none';
+                els.btnExport.disabled = false;
+            }, 50);
+        });
+
+        function processSlicing() {
+            const thickness = parseFloat(els.sliderThickness.value);
+            const margin = parseFloat(els.sliderMargin.value);
+            const dowelRadius = parseFloat(els.sliderDowel.value);
+            
+            const box = objectGeometry.boundingBox;
+            const minZ = box.min.z;
+            const maxZ = box.max.z;
+            
+            const xmin = box.min.x - margin;
+            const xmax = box.max.x + margin;
+            const ymin = box.min.y - margin;
+            const ymax = box.max.y + margin;
+            
+            // Dimensions for left and right halves
+            const widthLeft = Math.abs(xmin);
+            const widthRight = Math.abs(xmax);
+            const height = ymax - ymin;
+            const dowelOffset = 10; // Distance of dowel hole from corner
+
+            finalPieces = [];
+            let layerCount = 1;
+
+            // --- Génération de la plaque de fond (Base solide) ---
+            if (els.checkBottomPlate.checked) {
+                // Plaque de fond Gauche
+                let leftBaseSvg = `<rect x="0" y="0" width="${widthLeft}" height="${height}" class="cut-line" />`;
+                if (dowelRadius > 0) {
+                    leftBaseSvg += `<circle cx="${dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftBaseSvg += `<circle cx="${widthLeft - dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftBaseSvg += `<circle cx="${dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftBaseSvg += `<circle cx="${widthLeft - dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                }
+                leftBaseSvg += `<text x="${widthLeft/2}" y="${height/2}" class="engrave-text">L_BASE</text>`;
+                finalPieces.push({ w: widthLeft, h: height, svg: leftBaseSvg, label: `L_BASE` });
+
+                // Plaque de fond Droite
+                let rightBaseSvg = `<rect x="0" y="0" width="${widthRight}" height="${height}" class="cut-line" />`;
+                if (dowelRadius > 0) {
+                    rightBaseSvg += `<circle cx="${dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightBaseSvg += `<circle cx="${widthRight - dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightBaseSvg += `<circle cx="${dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightBaseSvg += `<circle cx="${widthRight - dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                }
+                rightBaseSvg += `<text x="${widthRight/2}" y="${height/2}" class="engrave-text">R_BASE</text>`;
+                finalPieces.push({ w: widthRight, h: height, svg: rightBaseSvg, label: `R_BASE` });
+            }
+
+            // Core slicing loop
+            for (let z = minZ + thickness / 2; z <= maxZ; z += thickness) {
+                const rawLoops = getSliceLoops(objectGeometry, z);
+                
+                let svgHolesLeft = "";
+                let svgHolesRight = "";
+                
+                rawLoops.forEach(loop => {
+                    const clipL = clipPolygonX0(loop, 'left');
+                    const clipR = clipPolygonX0(loop, 'right');
+                    
+                    // Convert to SVG paths (with local coordinate offset)
+                    svgHolesLeft += createSvgPathString(clipL, xmin, ymin); // Left block origin is (xmin, ymin)
+                    svgHolesRight += createSvgPathString(clipR, 0, ymin);   // Right block origin is (0, ymin)
+                });
+                
+                // --- Construct Left Piece SVG ---
+                let leftSvg = `<rect x="0" y="0" width="${widthLeft}" height="${height}" class="cut-line" />`;
+                // Dowels
+                if (dowelRadius > 0) {
+                    leftSvg += `<circle cx="${dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftSvg += `<circle cx="${widthLeft - dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftSvg += `<circle cx="${dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    leftSvg += `<circle cx="${widthLeft - dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                }
+                // Holes (The model slice)
+                if (svgHolesLeft) leftSvg += `<path d="${svgHolesLeft}" class="cut-line" />`;
+                // Label
+                leftSvg += `<text x="${widthLeft/2}" y="${height/2}" class="engrave-text">L${layerCount}</text>`;
+                
+                finalPieces.push({ w: widthLeft, h: height, svg: leftSvg, label: `L${layerCount}` });
+
+                // --- Construct Right Piece SVG ---
+                let rightSvg = `<rect x="0" y="0" width="${widthRight}" height="${height}" class="cut-line" />`;
+                // Dowels
+                if (dowelRadius > 0) {
+                    rightSvg += `<circle cx="${dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightSvg += `<circle cx="${widthRight - dowelOffset}" cy="${dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightSvg += `<circle cx="${dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                    rightSvg += `<circle cx="${widthRight - dowelOffset}" cy="${height - dowelOffset}" r="${dowelRadius}" class="cut-line"/>`;
+                }
+                // Holes
+                if (svgHolesRight) rightSvg += `<path d="${svgHolesRight}" class="cut-line" />`;
+                // Label
+                rightSvg += `<text x="${widthRight/2}" y="${height/2}" class="engrave-text">R${layerCount}</text>`;
+                
+                finalPieces.push({ w: widthRight, h: height, svg: rightSvg, label: `R${layerCount}` });
+
+                layerCount++;
+            }
+            
+            layoutAndRenderSVG();
+        }
+
+        let activePieceIndex = null;
+        let dragOffset = { x: 0, y: 0 };
+
+        function layoutAndRenderSVG() {
+            const optimize = els.checkOptimize.checked;
+            const allowRotation = els.checkRotate.checked;
+            const plateW = parseFloat(els.inputPlateWidth.value);
+            const plateH = parseFloat(els.inputPlateHeight.value);
+            const plateMargin = 30;
+            let requiredPlates = 1;
+
+            if (optimize) {
+                let piecesToPack = finalPieces.map((p, i) => ({...p, originalIndex: i}));
+                
+                // Tri amélioré : on classe par dimension maximum, puis par aire globale
+                piecesToPack.sort((a, b) => {
+                    const maxA = Math.max(a.w, a.h);
+                    const maxB = Math.max(b.w, b.h);
+                    if (Math.abs(maxB - maxA) > 0.1) return maxB - maxA;
+                    return (b.w * b.h) - (a.w * a.h);
+                });
+
+                let packers = [new MaxRectsPacker(plateW - exportGap * 2, plateH - exportGap * 2)];
+
+                piecesToPack.forEach(p => {
+                    const reqW = p.w + exportGap;
+                    const reqH = p.h + exportGap;
+                    let fit = null;
+                    let targetPlate = -1;
+
+                    for (let i = 0; i < packers.length; i++) {
+                        fit = packers[i].insert(reqW, reqH, allowRotation);
+                        if (fit) { targetPlate = i; break; }
+                    }
+
+                    if (!fit) {
+                        packers.push(new MaxRectsPacker(plateW - exportGap * 2, plateH - exportGap * 2));
+                        targetPlate = packers.length - 1;
+                        fit = packers[targetPlate].insert(reqW, reqH, allowRotation);
+                    }
+
+                    const origP = finalPieces[p.originalIndex];
+                    if (fit) {
+                        const py = targetPlate * (plateH + plateMargin);
+                        if (fit.rotated) {
+                            // Correction mathématique cruciale du centre de rotation pour SVG
+                            origP.tx = exportGap + fit.x + p.h/2 - p.w/2;
+                            origP.ty = py + exportGap + fit.y + p.w/2 - p.h/2; 
+                            origP.r = 90;
+                        } else {
+                            origP.tx = exportGap + fit.x;
+                            origP.ty = py + exportGap + fit.y;
+                            origP.r = 0;
+                        }
+                    } else {
+                        origP.tx = exportGap; origP.ty = exportGap; origP.r = 0;
+                    }
+                });
+                requiredPlates = packers.length;
+            } else {
+                // Keep manual layout or fallback
+                let curX = exportGap, curY = exportGap, rowH = 0;
+                finalPieces.forEach(p => {
+                    if (p.tx === undefined) {
+                        if (curX + p.w > plateW) { curX = exportGap; curY += rowH + exportGap; rowH = 0; }
+                        p.tx = curX; p.ty = curY; p.r = 0;
+                        curX += p.w + exportGap; rowH = Math.max(rowH, p.h);
+                    }
+                });
+                requiredPlates = Math.max(1, Math.ceil(Math.max(...finalPieces.map(p => p.ty + p.h)) / (plateH + plateMargin)));
+            }
+
+            const svgW = Math.max(plateW, Math.max(...finalPieces.map(p => p.tx + (p.r ? p.h : p.w))) + 50); 
+            const svgH = requiredPlates * (plateH + plateMargin);
+
+            let svgHtml = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-20 -20 ${svgW + 40} ${svgH + 40}" width="100%" height="100%">`;
+            
+            // Draw plates
+            svgHtml += `<g id="plate-layer">`;
+            for(let i=0; i<requiredPlates; i++) {
+                const py = i * (plateH + plateMargin);
+                svgHtml += `<rect x="0" y="${py}" width="${plateW}" height="${plateH}" class="plate-line" />
+                            <text x="5" y="${py + 15}" class="plate-text">Plaque ${i+1}</text>`;
+            }
+            svgHtml += `</g><g id="pieces-layer">`;
+
+            // Draw pieces
+            finalPieces.forEach((p, index) => {
+                const cx = p.w / 2;
+                const cy = p.h / 2;
+                const gTransform = `translate(${p.tx}, ${p.ty}) rotate(${p.r || 0}, ${cx}, ${cy})`;
+                
+                svgHtml += `<g class="draggable-piece cursor-grab" data-index="${index}" transform="${gTransform}">
+                    <rect x="0" y="0" width="${p.w}" height="${p.h}" class="hitbox" />
+                    ${p.svg}
+                </g>`;
+            });
+
+            svgHtml += `</g></svg>`;
+            els.svgContainer.innerHTML = svgHtml;
+        }
+
+        // --- Drag & Drop Interactivity ---
+        function getMousePosition(evt) {
+            const svg = els.svgContainer.querySelector('svg');
+            if (!svg) return {x: 0, y: 0};
+            const CTM = svg.getScreenCTM();
+            let clientX = evt.clientX || (evt.touches && evt.touches[0].clientX);
+            let clientY = evt.clientY || (evt.touches && evt.touches[0].clientY);
+            return { x: (clientX - CTM.e) / CTM.a, y: (clientY - CTM.f) / CTM.d };
+        }
+
+        const startDrag = (e) => {
+            const group = e.target.closest('.draggable-piece');
+            if (!group) return;
+            if(e.type === 'touchstart') e.preventDefault();
+            activePieceIndex = parseInt(group.dataset.index);
+            const p = finalPieces[activePieceIndex];
+            const pt = getMousePosition(e);
+            dragOffset.x = pt.x - p.tx; dragOffset.y = pt.y - p.ty;
+            group.classList.remove('cursor-grab'); group.classList.add('cursor-grabbing');
+            group.parentNode.appendChild(group); // bring to front
+        };
+
+        const drag = (e) => {
+            if (activePieceIndex === null) return;
+            e.preventDefault();
+            const pt = getMousePosition(e);
+            const p = finalPieces[activePieceIndex];
+            p.tx = pt.x - dragOffset.x; p.ty = pt.y - dragOffset.y;
+            const group = els.svgContainer.querySelector(`.draggable-piece[data-index="${activePieceIndex}"]`);
+            if (group) group.setAttribute('transform', `translate(${p.tx}, ${p.ty}) rotate(${p.r || 0}, ${p.w/2}, ${p.h/2})`);
+            els.checkOptimize.checked = false; // Disable auto layout
+        };
+
+        const endDrag = () => {
+            if (activePieceIndex !== null) {
+                const group = els.svgContainer.querySelector(`.draggable-piece[data-index="${activePieceIndex}"]`);
+                if (group) { group.classList.remove('cursor-grabbing'); group.classList.add('cursor-grab'); }
+                activePieceIndex = null;
+            }
+        };
+
+        const rotatePiece = (e) => {
+            const group = e.target.closest('.draggable-piece');
+            if (group) {
+                e.preventDefault();
+                const p = finalPieces[parseInt(group.dataset.index)];
+                p.r = ((p.r || 0) + 90) % 360;
+                group.setAttribute('transform', `translate(${p.tx}, ${p.ty}) rotate(${p.r}, ${p.w/2}, ${p.h/2})`);
+                els.checkOptimize.checked = false;
+            }
+        };
+
+        els.svgContainer.addEventListener('mousedown', startDrag);
+        els.svgContainer.addEventListener('mousemove', drag);
+        window.addEventListener('mouseup', endDrag); 
+        els.svgContainer.addEventListener('touchstart', startDrag, {passive: false});
+        els.svgContainer.addEventListener('touchmove', drag, {passive: false});
+        window.addEventListener('touchend', endDrag);
+        els.svgContainer.addEventListener('contextmenu', rotatePiece);
+        els.svgContainer.addEventListener('dblclick', rotatePiece);
+
+        // --- Inputs triggers layout re-eval (if not disabled) ---
+        [els.checkOptimize, els.checkRotate, els.inputPlateWidth, els.inputPlateHeight].forEach(el => {
+            el.addEventListener('input', () => {
+                if(finalPieces.length > 0) layoutAndRenderSVG();
+            });
+        });
+
+        // --- Export ---
+        els.btnExport.addEventListener('click', () => {
+            if(finalPieces.length === 0) return;
+            const cloneSvg = els.svgContainer.querySelector('svg').cloneNode(true);
+            
+            cloneSvg.querySelectorAll('.draggable-piece').forEach(g => {
+                g.removeAttribute('class');
+                g.removeAttribute('data-index');
+            });
+            cloneSvg.querySelectorAll('.hitbox').forEach(h => h.remove());
+
+            const style = document.createElement('style');
+            style.innerHTML = `
+                .cut-line { stroke: #FF0000; stroke-width: 0.5px; fill: none; }
+                .engrave-text { fill: #000000; font-family: sans-serif; font-size: 8px; text-anchor: middle; dominant-baseline: middle; }
+                .plate-line { stroke: #3b82f6; stroke-width: 1px; stroke-dasharray: 5,5; fill: none; }
+                .plate-text { fill: #3b82f6; font-family: sans-serif; font-size: 10px; }
+            `;
+            cloneSvg.prepend(style);
+
+            const blob = new Blob([cloneSvg.outerHTML], {type: "image/svg+xml;charset=utf-8"});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Moule_Slicer.svg`;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        });
+
+    </script>
+</body>
+</html>
